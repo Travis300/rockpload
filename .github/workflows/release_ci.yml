@@ -23,6 +23,9 @@ jobs:
 
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      # The Android build needs the signing key, which only exists in the
+      # repository that owns it. Forks release Windows and Linux only.
+      HAS_ANDROID_KEY: ${{ secrets.KEY_ALIAS != '' }}
 
     steps:
       - name: Checkout
@@ -62,11 +65,13 @@ jobs:
             gcc-mingw-w64-x86-64
 
       - name: Set up Android SDK
+        if: env.HAS_ANDROID_KEY == 'true'
         uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools'
 
       - name: Install Android Build Dependencies
+        if: env.HAS_ANDROID_KEY == 'true'
         run: |
           go install fyne.io/tools/cmd/fyne@latest
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
@@ -90,6 +95,7 @@ jobs:
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
       - name: Install Bundletool
+        if: env.HAS_ANDROID_KEY == 'true'
         run: |
           wget https://github.com/google/bundletool/releases/download/1.17.0/bundletool-all-1.17.0.jar -O bundletool.jar
           
@@ -98,6 +104,7 @@ jobs:
           sudo chmod +x /usr/local/bin/bundletool
 
       - name: Prepare Keystore
+        if: env.HAS_ANDROID_KEY == 'true'
         run: |
           mkdir -p keystore
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > keystore/rockpload.keystore
@@ -105,16 +112,17 @@ jobs:
       - name: Build with Script
         env:
           ROCKPLOAD_VERSION: ${{ env.RELEASE_TAG }}
-          BUILD_ANDROID: "true"
+          BUILD_ANDROID: ${{ env.HAS_ANDROID_KEY }}
           ROCKPLOAD_KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
           ROCKPLOAD_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          ROCKPLOAD_SIGNED: "true"
+          ROCKPLOAD_SIGNED: ${{ env.HAS_ANDROID_KEY }}
         run: |
           chmod +x ./scripts/build.sh
           chmod +x ./scripts/build-android.sh
           ./scripts/build.sh
 
       - name: Extracting Signed Universal APK
+        if: env.HAS_ANDROID_KEY == 'true'
         env:
           KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
