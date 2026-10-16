@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,10 +87,15 @@ func (w *Website) uploadMultipart(filePath string, replayUpload ReplayUpload) er
 	}
 	defer file.Close()
 
+	target := w.config.URL + w.config.ReplayPath
+	discord := isDiscordWebhook(target)
+
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
-	if w.version != "" {
+	// Discord's Execute Webhook only keeps attachments, so the version field
+	// is left out there and the match goes in as a file of its own.
+	if w.version != "" && !discord {
 		if err := writer.WriteField("rockploadVersion", w.version); err != nil {
 			logger.Rlogger.Warn("Failed to add version field to multipart", "error", err)
 		}
@@ -101,14 +107,29 @@ func (w *Website) uploadMultipart(filePath string, replayUpload ReplayUpload) er
 			return fmt.Errorf("Failed to marshal match to JSON: %w", err)
 		}
 
-		err = writer.WriteField("match", string(jsonData))
-		if err != nil {
-			return fmt.Errorf("Failed to add JSON field to multipart: %w", err)
+		if discord {
+			matchPart, err := writer.CreateFormFile(discordMatchField, discordMatchFileName)
+			if err == nil {
+				_, err = matchPart.Write(jsonData)
+			}
+			if err != nil {
+				return fmt.Errorf("Failed to add match file to multipart: %w", err)
+			}
+		} else {
+			err = writer.WriteField("match", string(jsonData))
+			if err != nil {
+				return fmt.Errorf("Failed to add JSON field to multipart: %w", err)
+			}
 		}
 	}
 
+	replayField := "file"
+	if discord {
+		replayField = discordReplayField
+	}
+
 	fileName := replayUploadFileName(filePath, w.config.TemplateName, replayUpload, w.knownPlaylists)
-	part, err := writer.CreateFormFile("file", fileName)
+	part, err := writer.CreateFormFile(replayField, fileName)
 	if err != nil {
 		return err
 	}
@@ -123,7 +144,7 @@ func (w *Website) uploadMultipart(filePath string, replayUpload ReplayUpload) er
 		return err
 	}
 
-	req, err := http.NewRequest("POST", w.config.URL+w.config.ReplayPath, &body)
+	req, err := http.NewRequest("POST", target, &body)
 	if err != nil {
 		return err
 	}
@@ -135,6 +156,11 @@ func (w *Website) uploadMultipart(filePath string, replayUpload ReplayUpload) er
 	q := req.URL.Query()
 	for key, value := range w.config.URIParams {
 		q.Add(key, value)
+	}
+	if discord {
+		// Makes Discord answer 200 with the created message, and report a
+		// message it could not save as an error rather than a silent 204.
+		q.Set("wait", "true")
 	}
 	req.URL.RawQuery = q.Encode()
 
@@ -149,6 +175,19 @@ func (w *Website) uploadMultipart(filePath string, replayUpload ReplayUpload) er
 
 	respBody, _ := io.ReadAll(resp.Body)
 
+	if discord {
+		// Discord never answers 201, and has no duplicate status: a webhook
+		// accepts every post, so de-duplication is left to whoever reads the
+		// channel.
+		switch resp.StatusCode {
+		case 200, 204:
+			logger.Rlogger.Debug("Upload successful")
+			return nil
+		default:
+			return fmt.Errorf("Upload failed: %s\n%s", resp.Status, string(respBody))
+		}
+	}
+
 	switch resp.StatusCode {
 	case 201:
 		logger.Rlogger.Debug("Upload successful")
@@ -161,6 +200,34 @@ func (w *Website) uploadMultipart(filePath string, replayUpload ReplayUpload) er
 	}
 
 	return nil
+}
+
+// Discord webhook storages: a storage whose URL is a Discord webhook
+// (https://discord.com/api/webhooks/{id}/{token}) has its uploads shaped the
+// way Discord's Execute Webhook expects -- the replay and the match JSON as
+// attachments, and 200/204 as success -- so a bot reading the channel can
+// collect replays with no server of its own.
+const (
+	discordReplayField    = "files[0]"
+	discordMatchField     = "files[1]"
+	discordMatchFileName  = "match.json"
+	discordWebhookPathTag = "/api/webhooks/"
+)
+
+var discordWebhookHosts = map[string]bool{
+	"discord.com":        true,
+	"discordapp.com":     true,
+	"ptb.discord.com":    true,
+	"canary.discord.com": true,
+}
+
+func isDiscordWebhook(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Scheme != "https" {
+		return false
+	}
+	return discordWebhookHosts[strings.ToLower(parsed.Hostname())] &&
+		strings.HasPrefix(parsed.Path, discordWebhookPathTag)
 }
 
 func (w *Website) uploadPresignedSession(filePath string, replayUpload ReplayUpload) error {
