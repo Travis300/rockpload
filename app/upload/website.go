@@ -123,6 +123,12 @@ func (w *Website) uploadMultipart(filePath string, replayUpload ReplayUpload) er
 		}
 	}
 
+	if discord {
+		if err := writeDiscordUploader(writer, replayUpload); err != nil {
+			return fmt.Errorf("Failed to add uploader file to multipart: %w", err)
+		}
+	}
+
 	replayField := "file"
 	if discord {
 		replayField = discordReplayField
@@ -230,7 +236,25 @@ type discordUploader struct {
 // PlayerID it is known by (its own and its linked platforms). Left out when
 // there are no ids to send.
 func writeDiscordUploader(writer *multipart.Writer, replayUpload ReplayUpload) error {
-	return nil
+	if len(replayUpload.PlayerIDs) == 0 {
+		return nil
+	}
+
+	jsonData, err := json.Marshal(discordUploader{
+		PlayerName: replayUpload.PlayerName,
+		PlayerIDs:  replayUpload.PlayerIDs,
+	})
+	if err != nil {
+		return err
+	}
+
+	part, err := writer.CreateFormFile(discordUploaderField, discordUploaderFileName)
+	if err != nil {
+		return err
+	}
+
+	_, err = part.Write(jsonData)
+	return err
 }
 
 var discordWebhookHosts = map[string]bool{
