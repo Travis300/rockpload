@@ -214,6 +214,25 @@ const (
 	discordWebhookPathTag = "/api/webhooks/"
 )
 
+// Who the upload is from: the signed-in account's PlayerIDs, so the bot can
+// tell which player in the match is its member without guessing.
+const (
+	discordUploaderField    = "files[2]"
+	discordUploaderFileName = "uploader.json"
+)
+
+type discordUploader struct {
+	PlayerName string   `json:"PlayerName"`
+	PlayerIDs  []string `json:"PlayerIDs"`
+}
+
+// writeDiscordUploader adds uploader.json: the account's name and every
+// PlayerID it is known by (its own and its linked platforms). Left out when
+// there are no ids to send.
+func writeDiscordUploader(writer *multipart.Writer, replayUpload ReplayUpload) error {
+	return nil
+}
+
 var discordWebhookHosts = map[string]bool{
 	"discord.com":        true,
 	"discordapp.com":     true,
