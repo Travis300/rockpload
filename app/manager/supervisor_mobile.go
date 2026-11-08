@@ -29,6 +29,12 @@ func (rls *RLSupervisor) Supervise() {
 	logger.FuncDebug()
 }
 
+func (rls *RLSupervisor) GameRunning() bool {
+	logger.FuncDebug()
+
+	return false
+}
+
 // Looper Inherit method
 func (rls *RLSupervisor) Start() {
 	logger.FuncDebug()

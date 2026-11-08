@@ -4,7 +4,9 @@ import (
 	_ "embed"
 	"log/slog"
 	"os"
+	"slices"
 
+	"github.com/LEX0RE/rockpload/app/bridge"
 	"github.com/LEX0RE/rockpload/app/config"
 	"github.com/LEX0RE/rockpload/app/manager"
 	"github.com/LEX0RE/rockpload/app/rlgame"
@@ -20,6 +22,10 @@ import (
 
 //go:embed assets/logo.png
 var logoBytes []byte
+
+// backgroundArg is passed by the Start with system shortcut: a launch at
+// sign-in goes straight to the tray, while opening the app by hand shows it.
+const backgroundArg = "--background"
 
 type duplicateLock interface {
 	Unlock() error
@@ -41,6 +47,7 @@ type App struct {
 	accountManager *manager.AccountManager
 	rlSupervisor   *manager.RLSupervisor
 	rlLocator      *rlgame.Locator
+	bridge         *bridge.Bridge
 }
 
 func NewApp(version string, app fyne.App) *App {
@@ -94,6 +101,9 @@ func NewApp(version string, app fyne.App) *App {
 
 func (a *App) Close() {
 	logger.FuncDebug()
+	if a.bridge != nil {
+		a.bridge.Stop()
+	}
 	if a.duplicateLock != nil {
 		a.duplicateLock.Unlock()
 	}
@@ -117,7 +127,9 @@ func (a *App) Run() {
 
 	a.window.Resize(fyne.NewSize(700, 450))
 
-	if !updateAvailable && a.canRunInTray() && a.appConfig.BehaviorConfig.ExitInTray.Get() && a.appConfig.BehaviorConfig.StartInTray.Get() {
+	startHidden := a.appConfig.BehaviorConfig.StartInTray.Get() || slices.Contains(os.Args[1:], backgroundArg)
+
+	if !updateAvailable && a.canRunInTray() && a.appConfig.BehaviorConfig.ExitInTray.Get() && startHidden {
 		a.app.Run()
 	} else {
 		a.window.ShowAndRun()
@@ -132,6 +144,7 @@ func (a *App) initManager() {
 	a.appConfig.BehaviorConfig.AutoUploadRandomTime.Bind(a.uploader.SetMaxJitter)
 
 	a.rlSupervisor = manager.NewRLSupervisor(a.appConfig, a.accountManager)
+	a.uploader.HoldWhile = a.rlSupervisor.GameRunning
 
 	a.rlLocator = rlgame.NewLocator()
 	if a.supportsLocalStatsAPI() {
@@ -139,7 +152,7 @@ func (a *App) initManager() {
 	}
 
 	var err error
-	a.gui, err = ui.NewGUI(a.window, a.version, a.appConfig, a.accountManager, a.rlSupervisor, a.rlLocator, a.app.Clipboard)
+	a.gui, err = ui.NewGUI(a.window, a.version, a.appConfig, a.accountManager, a.rlSupervisor, a.rlLocator, a.bridgeStatus, a.app.Clipboard)
 	if err != nil {
 		logger.Rlogger.Error("Failed to initialize GUI:", slog.Any("err", err))
 	}
@@ -150,13 +163,19 @@ func (a *App) initEvents() {
 
 	a.statsApi = rocket_network.NewStatsAPI()
 	a.statsApi.PortsProvider = a.rlLocator.StatsAPIPorts
-	uploadLiveStatsEvent := []tools.EventType{"CountdownBegin", "PodiumStart"}
+	uploadLiveStatsEvent := []tools.EventType{"CountdownBegin", "PodiumStart", rocket_network.EventOvertimeStarted}
 	a.statsApi.EventManager.MultiSubscribe(uploadLiveStatsEvent, tools.Listener{IsSync: false, Callback: func(data any) {
 		a.uploader.UploadLiveStats(a.statsApi.LastInfo)
 	}})
 
 	if a.supportsLocalStatsAPI() {
 		a.statsApi.StartListener()
+
+		a.bridge = bridge.New(a.version, a.statsApi, a.appConfig.BehaviorConfig.AllowWebsiteReplay.Get, a.appConfig.OpenReplayTargets)
+		a.bridge.Start(a.appConfig.BehaviorConfig.WebsiteBridgePort.Get())
+		a.appConfig.BehaviorConfig.WebsiteBridgePort.Bind(func(port int) {
+			go a.bridge.Start(port)
+		})
 	}
 
 	onUpdateState := func() {
@@ -190,6 +209,21 @@ func (a *App) initEvents() {
 		}
 
 		a.uploader.UploadLocalFile(filePath)
+	}})
+
+	a.gui.EventManager.Subscribe(ui.EVENT_CLICK_LOAD_REPLAY_IN_GAME, tools.Listener{IsSync: false, Callback: func(data any) {
+		request, ok := data.(ui.LoadReplayRequest)
+		if !ok {
+			return
+		}
+
+		go func() {
+			sent, err := a.loadReplayInGame(request)
+			if err != nil {
+				logger.Rlogger.Error("Failed to load replay in game", slog.String("Mode", string(request.Mode)), slog.Any("err", err))
+			}
+			request.OnResult(sent, err)
+		}()
 	}})
 
 	a.uploader.EventManager.Subscribe(upload.EventSingleUploadCompleted, tools.Listener{IsSync: false, Callback: func(data any) {
@@ -291,6 +325,8 @@ func (a *App) initEvents() {
 		if a.appConfig.BehaviorConfig.UploadOnRLClose.Get() {
 			a.uploader.Run()
 		}
+
+		go rlgame.ClearTempReplays()
 	}})
 }
 
@@ -299,6 +335,10 @@ func (a *App) startManager() {
 
 	if a.appConfig.BehaviorConfig.AutoUpload.Get() {
 		a.uploader.Start()
+	}
+
+	if a.supportsLocalStatsAPI() {
+		go rlgame.ClearTempReplays()
 	}
 
 	a.startPlatformManagers()
@@ -352,4 +392,12 @@ func (a *App) SetUploadOnRLClose(value bool) {
 	if a.rlSupervisor != nil {
 		a.rlSupervisor.Toggle(value)
 	}
+}
+
+func (a *App) bridgeStatus() (string, bool) {
+	if a.bridge == nil {
+		return "", false
+	}
+
+	return a.bridge.StatusText()
 }

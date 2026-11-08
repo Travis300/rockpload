@@ -50,6 +50,13 @@ func (a *App) startPlatformManagers() {
 	logger.FuncDebug()
 
 	a.rlSupervisor.Start()
+
+	// The setting only registers on change, so a fresh install's default (on)
+	// needs registering here. Re-registering also refreshes the shortcut's
+	// path and arguments if the exe moved or an older build made it.
+	if a.appConfig.BehaviorConfig.AutoStart.Get() {
+		a.SetAutoStart(true)
+	}
 }
 
 func (a *App) createDuplicateLock() bool {
@@ -77,7 +84,7 @@ func (a *App) SetAutoStart(value bool) {
 	asapp := &autostart.App{
 		Name:        "lexore-rockpload",
 		DisplayName: "Rockpload",
-		Exec:        []string{execPath},
+		Exec:        []string{execPath, backgroundArg},
 	}
 
 	if value {

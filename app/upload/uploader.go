@@ -62,6 +62,9 @@ type Uploader struct {
 	accountManager *manager.AccountManager
 
 	EventManager *tools.EventManager
+
+	// Timed uploads wait while this returns true (Rocket League is open)
+	HoldWhile func() bool
 }
 
 func NewUploader(version string, appConfig *config.AppConfig, accountManager *manager.AccountManager) *Uploader {
@@ -73,12 +76,26 @@ func NewUploader(version string, appConfig *config.AppConfig, accountManager *ma
 	autoUploadRandomTime := appConfig.BehaviorConfig.AutoUploadRandomTime.Get()
 
 	if appConfig.BehaviorConfig.UploadOnLaunch.Get() {
-		u.Looper = rtime.NewLooper(autoUploadTime, u.Run, u.Run, nil, 0, autoUploadRandomTime)
+		u.Looper = rtime.NewLooper(autoUploadTime, u.autoRun, u.autoRun, nil, 0, autoUploadRandomTime)
 	} else {
-		u.Looper = rtime.NewLooper(autoUploadTime, u.Run, nil, nil, 0, autoUploadRandomTime)
+		u.Looper = rtime.NewLooper(autoUploadTime, u.autoRun, nil, nil, 0, autoUploadRandomTime)
 	}
 
 	return u
+}
+
+// autoRun is the timed upload. Fetching match history signs in as the player,
+// which can disconnect them mid-match, so it waits while the game is open and
+// leaves those games to the upload on game close (or the next tick).
+func (u *Uploader) autoRun() {
+	logger.FuncDebug()
+
+	if u.HoldWhile != nil && u.HoldWhile() {
+		logger.Rlogger.Info("Rocket League is open, auto upload waits until it closes")
+		return
+	}
+
+	u.Run()
 }
 
 func (u *Uploader) Run() {
@@ -131,13 +148,18 @@ func (u *Uploader) UploadLiveStats(liveStats *rocket_network.LiveStats) {
 
 	defer u.lockInLiveUpload.Unlock()
 
-	logger.Rlogger.Info("Start Upload Live Stats Process")
+	if liveStats != nil {
+		seconds, _ := liveStats.TimeSeconds()
+		logger.Rlogger.Info("Start Upload Live Stats Process", slog.Int("TimeSeconds", seconds), slog.Bool("Overtime", liveStats.Overtime()))
+	} else {
+		logger.Rlogger.Info("Start Upload Live Stats Process")
+	}
 
 	if !u.appConfig.BehaviorConfig.SendLiveStat.Get() {
 		return
 	}
 
-	if liveStats == nil || liveStats.State == nil || liveStats.State.MatchGuid == "" {
+	if liveStats == nil || liveStats.MatchGuid() == "" {
 		logger.Rlogger.Debug("Skipping live stat upload, no matchGuid")
 		return
 	}

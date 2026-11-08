@@ -150,7 +150,7 @@ func (w *Website) uploadMultipart(filePath string, replayUpload ReplayUpload) er
 	}
 
 	if w.config.TokenStyle != config.NoToken && w.config.Token != "" {
-		req.Header.Set("Authorization", w.authHeader())
+		req.Header.Set("Authorization", w.config.AuthorizationHeader())
 	}
 
 	q := req.URL.Query()
@@ -261,7 +261,7 @@ func (w *Website) createUploadSession() (*presignedUploadSession, error) {
 	}
 
 	if w.config.TokenStyle != config.NoToken && w.config.Token != "" {
-		req.Header.Set("Authorization", w.authHeader())
+		req.Header.Set("Authorization", w.config.AuthorizationHeader())
 	}
 
 	q := req.URL.Query()
@@ -379,7 +379,7 @@ func (w *Website) uploadStatus(fileID string) (*presignedUploadStatus, error) {
 	}
 
 	if w.config.TokenStyle != config.NoToken && w.config.Token != "" {
-		req.Header.Set("Authorization", w.authHeader())
+		req.Header.Set("Authorization", w.config.AuthorizationHeader())
 	}
 
 	client := &http.Client{}
@@ -431,7 +431,7 @@ func (w *Website) UploadLive(liveStats *rocket_network.LiveStats) error {
 	req.Header.Set("Content-Type", "application/json")
 
 	if w.config.TokenStyle != config.NoToken && w.config.Token != "" {
-		req.Header.Set("Authorization", w.authHeader())
+		req.Header.Set("Authorization", w.config.AuthorizationHeader())
 	}
 
 	q := req.URL.Query()
@@ -483,7 +483,7 @@ func (w *Website) pingRequiresOK() error {
 	}
 
 	if w.config.TokenStyle != config.NoToken && w.config.Token != "" {
-		req.Header.Set("Authorization", w.authHeader())
+		req.Header.Set("Authorization", w.config.AuthorizationHeader())
 	}
 
 	client := &http.Client{}
@@ -535,7 +535,7 @@ func (w *Website) patchTitle(fileName string, respBody []byte) {
 
 	patchReq.Header.Set("Content-Type", "application/json")
 	if w.config.TokenStyle != config.NoToken && w.config.Token != "" {
-		patchReq.Header.Set("Authorization", w.authHeader())
+		patchReq.Header.Set("Authorization", w.config.AuthorizationHeader())
 	}
 
 	patchClient := &http.Client{}
@@ -564,7 +564,7 @@ func (w *Website) pingNotFoundIsValid() error {
 	}
 
 	if w.config.TokenStyle != config.NoToken && w.config.Token != "" {
-		req.Header.Set("Authorization", w.authHeader())
+		req.Header.Set("Authorization", w.config.AuthorizationHeader())
 	}
 
 	client := &http.Client{}
@@ -581,15 +581,4 @@ func (w *Website) pingNotFoundIsValid() error {
 	body, _ := io.ReadAll(resp.Body)
 
 	return fmt.Errorf("token is invalid: %s\n%s", resp.Status, string(body))
-}
-
-func (w *Website) authHeader() string {
-	if w.config.TokenStyle == config.BearerToken {
-		token := strings.TrimSpace(w.config.Token)
-		token = strings.TrimSpace(strings.TrimPrefix(token, "Bearer"))
-
-		return "Bearer " + token
-	}
-
-	return w.config.Token
 }

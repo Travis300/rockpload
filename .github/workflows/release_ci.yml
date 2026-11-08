@@ -149,7 +149,9 @@ jobs:
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
-          prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
+          # Fork tags always carry a suffix (v1.5.6-rb.2). Publish them as full
+          # releases so the in-app updater's releases/latest lookup finds them.
+          prerelease: false
           files: |
             releases/rockpload_*
 
