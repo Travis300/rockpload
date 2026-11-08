@@ -36,8 +36,9 @@ func NewAppConfig() *AppConfig {
 	cfg.BehaviorConfig.NoUploadOnline = NewSetting(true, saveHook)
 	cfg.BehaviorConfig.UploadOnRLClose = NewSetting(true, saveHook)
 	cfg.BehaviorConfig.SendLiveStat = NewSetting(true, saveHook)
+	// Replay-bot fork: on by default, so uploads run without opening the app
+	cfg.BehaviorConfig.AutoStart = NewSetting(true, saveHook)
 
-	cfg.BehaviorConfig.AutoStart = NewSetting(false, saveHook)
 	cfg.BehaviorConfig.StartInTray = NewSetting(false, saveHook)
 	cfg.BehaviorConfig.UploadOnLaunch = NewSetting(false, saveHook)
 	cfg.BehaviorConfig.UploadOlderFirst = NewSetting(false, saveHook)

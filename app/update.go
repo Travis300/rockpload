@@ -18,8 +18,7 @@ import (
 type UpdateSource string
 
 const (
-	UpdateSourceGitHub  UpdateSource = "GitHub"
-	UpdateSourceWebsite UpdateSource = "Rocky website"
+	UpdateSourceGitHub UpdateSource = "GitHub"
 )
 
 type UpdateInfo struct {
@@ -33,10 +32,10 @@ type Updater struct {
 	UpdateInfo *UpdateInfo
 }
 
-const (
-	githubReleasesURL = "https://api.github.com/repos/LEX0RE/rockpload/releases/latest"
-	websiteUpdateURL  = "https://lexore.ca/rocky/api/rockpload"
-)
+// The replay-bot fork updates only from its own releases. Upstream's builds,
+// on GitHub or the Rocky website, can't post to Discord webhooks, so offering
+// one would quietly break a member's uploads.
+const githubReleasesURL = "https://api.github.com/repos/Travis300/rockpload/releases/latest"
 
 func NewUpdater() *Updater {
 	logger.FuncDebug()
@@ -49,12 +48,7 @@ func (u *Updater) CheckForUpdate(currentVersion string) (bool, error) {
 
 	info, needUpdate, err := checkGitHubUpdate(currentVersion)
 	if err != nil {
-		logger.Rlogger.Warn("GitHub update check failed, falling back to Rocky website", slog.Any("err", err))
-
-		info, needUpdate, err = checkWebsiteUpdate(currentVersion)
-		if err != nil {
-			return false, err
-		}
+		return false, err
 	}
 
 	if !needUpdate {
@@ -136,35 +130,6 @@ func checkGitHubUpdate(currentVersion string) (*UpdateInfo, bool, error) {
 	}
 
 	return nil, false, fmt.Errorf("no matching asset found for %s in GitHub release %s", runtime.GOOS, release.TagName)
-}
-
-func checkWebsiteUpdate(currentVersion string) (*UpdateInfo, bool, error) {
-	logger.FuncDebug()
-
-	url := fmt.Sprintf(websiteUpdateURL+"?os=%s", runtime.GOOS)
-
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, false, err
-	}
-	defer resp.Body.Close()
-
-	var info UpdateInfo
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		return nil, false, err
-	}
-
-	if info.Version == "" {
-		return nil, false, nil
-	}
-
-	if semver.Compare(formatVersion(info.Version), formatVersion(currentVersion)) != 1 {
-		return nil, false, nil
-	}
-
-	info.Source = UpdateSourceWebsite
-
-	return &info, true, nil
 }
 
 func verifyChecksum(data []byte, expected string) bool {

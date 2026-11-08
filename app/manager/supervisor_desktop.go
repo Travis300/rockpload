@@ -106,6 +106,15 @@ func (rls *RLSupervisor) Supervise() {
 	}
 }
 
+// GameRunning checks the process list now, rather than the debounced
+// LastRLRunningState, which lags a launch by ~15s and freezes if supervision
+// is switched off.
+func (rls *RLSupervisor) GameRunning() bool {
+	logger.FuncDebug()
+
+	return rls.isRLRunning()
+}
+
 func (rls *RLSupervisor) isRLRunning() bool {
 	logger.FuncDebug()
 

@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"log/slog"
 	"os"
+	"slices"
 
 	"github.com/LEX0RE/rockpload/app/config"
 	"github.com/LEX0RE/rockpload/app/manager"
@@ -20,6 +21,10 @@ import (
 
 //go:embed assets/logo.png
 var logoBytes []byte
+
+// backgroundArg is passed by the Start with system shortcut: a launch at
+// sign-in goes straight to the tray, while opening the app by hand shows it.
+const backgroundArg = "--background"
 
 type duplicateLock interface {
 	Unlock() error
@@ -117,7 +122,9 @@ func (a *App) Run() {
 
 	a.window.Resize(fyne.NewSize(700, 450))
 
-	if !updateAvailable && a.canRunInTray() && a.appConfig.BehaviorConfig.ExitInTray.Get() && a.appConfig.BehaviorConfig.StartInTray.Get() {
+	startHidden := a.appConfig.BehaviorConfig.StartInTray.Get() || slices.Contains(os.Args[1:], backgroundArg)
+
+	if !updateAvailable && a.canRunInTray() && a.appConfig.BehaviorConfig.ExitInTray.Get() && startHidden {
 		a.app.Run()
 	} else {
 		a.window.ShowAndRun()
@@ -132,6 +139,7 @@ func (a *App) initManager() {
 	a.appConfig.BehaviorConfig.AutoUploadRandomTime.Bind(a.uploader.SetMaxJitter)
 
 	a.rlSupervisor = manager.NewRLSupervisor(a.appConfig, a.accountManager)
+	a.uploader.HoldWhile = a.rlSupervisor.GameRunning
 
 	a.rlLocator = rlgame.NewLocator()
 	if a.supportsLocalStatsAPI() {
